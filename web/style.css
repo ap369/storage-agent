@@ -1,0 +1,74 @@
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+#log {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-bottom: 1rem;
+}
+
+#log > div {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  white-space: pre-wrap;
+}
+
+.user {
+  align-self: flex-end;
+  background: #2563eb;
+  color: white;
+}
+
+.assistant {
+  align-self: flex-start;
+  background: #f1f5f9;
+}
+
+.tool-call,
+.tool-result {
+  align-self: flex-start;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: #64748b;
+  background: #f8fafc;
+}
+
+.error {
+  align-self: flex-start;
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.thinking {
+  align-self: flex-start;
+  font-style: italic;
+  color: #94a3b8;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+#composer {
+  display: flex;
+  gap: 0.5rem;
+}
+
+#content {
+  flex: 1;
+  padding: 0.5rem;
+  font-size: 1rem;
+}
