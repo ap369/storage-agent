@@ -1,6 +1,6 @@
 # storage-agent: AI agent with sandboxed file ops, allowlisted REST, MCP, chat webview, and a trigger API
 
-Status: implemented (Milestones 1–4 complete).
+Status: implemented (Milestones 1–4 complete), plus post-implementation additions: a WebSocket resilience fix, webview UX polish, and an MCP connection-status feature.
 
 ## Context
 
@@ -68,21 +68,22 @@ storage-agent/
   api/
     chat.py                      # WebSocket /ws/chat
     tasks.py                     # POST /tasks, GET /tasks/{id}
+    mcp_status.py                # GET /mcp/status
     schemas.py                   # pydantic request/response models
 
   storage/
     db.py                        # schema, init, seeding, CRUD helpers (aiosqlite)
 
   web/
-    index.html                   # chat UI shell
-    chat.js                      # WebSocket connect + auth frame + streaming render
+    index.html                   # chat UI shell + MCP status panel
+    chat.js                      # WebSocket connect + auth frame + streaming render + thinking indicator + MCP status fetch
     style.css
 
   data/                          # gitignored at runtime
     storage_agent.db
     sandbox/                     # default SANDBOX_ROOT
 
-  tests/                         # 78 tests, all passing
+  tests/                         # 83 tests, all passing
     test_sandbox_traversal.py
     test_files_tool.py
     test_tool_base.py
@@ -97,6 +98,7 @@ storage-agent/
     test_tasks_api.py
     test_rest_tool.py
     test_mcp_tool.py
+    test_mcp_status_api.py
     fixtures/dummy_mcp_server.py  # tiny real MCP stdio server used by test_mcp_tool.py
 ```
 
@@ -119,6 +121,7 @@ class Tool:
 - `agent/tools/rest.py::build_rest_tools(configs)` — one `Tool` per `(api_config, operation)` pair, named `{config_name}_{operation_name}`.
 - `agent/tools/mcp.py::build_mcp_tools(configs, stack)` — connects to each configured MCP server, lists its tools, wraps each as a `Tool` named `mcp_{server_name}_{tool_name}`.
 - `agent/registry.py::build_registry(*tool_groups)` — aggregates everything into one list + a `by_name` dict; raises `DuplicateToolName` at startup on any name collision (fail fast, not silent shadowing).
+- `agent/tools/mcp.py::summarize_connections(configs, tools)` — pure function, no new connection attempts. For each configured MCP server, checks whether any tool in the already-built `tools` list carries that server's `mcp_{name}_` prefix, and reports `{name, transport, connected, tools}`. Computed once at startup and stored on `app.state.mcp_status` for `GET /mcp/status` to serve.
 
 ## The agent core loop
 
@@ -160,6 +163,15 @@ All connections are long-lived async context managers entered into one `AsyncExi
 
 Discovered MCP tools are wrapped using the SDK's actual (snake_case) attribute names: `mcp_tool.name`, `mcp_tool.description`, `mcp_tool.input_schema` (the JSON alias `inputSchema` is not the Python attribute name in this SDK version), and `CallToolResult.content` items exposing `.text` for text blocks.
 
+## Chat WebSocket resilience (bug found while running the app live)
+
+The original `api/chat.py` only caught `ToolTurnLimitExceeded` around `run_conversation()`. Driving the app against a real (but unreachable) LLM endpoint surfaced an `openai.APIConnectionError` that propagated out of the WebSocket handler uncaught, killing the connection outright (`ConnectionClosedError: no close frame received or sent` on the client side) instead of reporting a clean error. Fixed by widening the `except` to catch any `Exception` from `run_conversation()`, matching the resilience `api/tasks.py` already had — the connection now sends `{"type": "error", "message": ...}` and stays open for the next message. Covered by `tests/test_chat_ws.py::test_llm_failure_sends_error_event_without_crashing_connection`, and re-verified live.
+
+## Webview UX additions
+
+- **Thinking indicator** (`web/chat.js`): local models can take tens of seconds per turn with no intermediate output, which looked indistinguishable from the app being broken. A pulsing "thinking…" line now appears immediately after sending a message and after each `tool_result` (since the loop goes back to the model), and disappears the instant any server event arrives.
+- **MCP status panel** (`web/index.html` `#mcp-status`, rendered by `chat.js::loadMcpStatus()`): on page load, fetches `GET /mcp/status` (using the same cached token as the WebSocket) and renders one badge per configured MCP server — green "name (N tools)" if connected, red "name (disconnected)" otherwise.
+
 ## Data model (SQLite)
 
 - `conversations(id, source['webview'|'task'], created_at, updated_at)`
@@ -175,6 +187,7 @@ Discovered MCP tools are wrapped using the SDK's actual (snake_case) attribute n
 - **`WebSocket /ws/chat`**: client's first frame must be `{"token": "..."}` (else `{"type": "error", "message": "unauthorized"}` then closed with code 4401). Then exchanges `{"type": "message", "conversation_id": "<uuid|null>", "content": "..."}` for streamed `{"type": "tool_call"|"tool_result"|"final"|"error", ...}` frames. A `null` `conversation_id` creates a new conversation; the server's own `final` event (not the core loop's) carries the `conversation_id` so the client can persist it for the next message.
 - **`POST /tasks`** (`Authorization: Bearer <token>`, body `{"input": "..."}`) → creates a task + conversation row, runs the agent loop as a background `asyncio.create_task`, returns `202` `{"task_id", "status": "pending"}` immediately.
 - **`GET /tasks/{task_id}`** (same auth) → `{"task_id", "status", "input", "result", "error", "created_at", "started_at", "finished_at"}`, `404` if unknown. A task interrupted by a server restart stays `running` rather than resuming (acceptable for v1; not retried automatically). A background task's own exceptions are always caught and recorded as `status="failed"`, `error=str(exc)` — verified live against an unreachable LLM endpoint.
+- **`GET /mcp/status`** (same auth) → `list[{"name", "transport", "connected", "tools"}]`, one entry per configured MCP server (regardless of whether it connected successfully), computed once at startup from `summarize_connections()`. Surfaced in the webview as a row of badges above the chat log.
 
 ## Config
 
@@ -191,14 +204,14 @@ Target Python 3.12 via `uv venv --python 3.12` (managed automatically by `uv`).
 
 ## Verification performed
 
-All 78 automated tests pass (`uv run pytest`), written test-first per milestone. In addition, each milestone was smoke-tested against the actual running server:
+All 83 automated tests pass (`uv run pytest`), written test-first throughout. In addition:
 
 - **Milestone 1**: server starts, static webview serves, WebSocket auth handshake rejects a wrong token and accepts the correct one.
 - **Milestone 2**: `POST /tasks` without a token → `401`; with a token → `202` + `task_id`; polling `GET /tasks/{id}` showed the real `pending → running → failed` lifecycle (failure expected — the smoke test used a placeholder, unreachable `LLM_BASE_URL`) with the connection error captured in `error`, proving the background task never crashes the server.
 - **Milestone 3**: server starts cleanly with the (empty) REST allowlist wired into the registry.
-- **Milestone 4**: server starts cleanly with a real local MCP stdio server (the same `dummy_mcp_server.py` fixture used in tests) configured in `mcp_servers.json`, with no connection warnings logged.
-
-**Not yet verified**: an actual end-to-end chat/task round trip against a real OpenAI-compatible LLM endpoint — that requires the user's real `LLM_BASE_URL`/`LLM_API_KEY`, which weren't available in this session.
+- **Milestone 4**: server starts cleanly with a real local MCP stdio server (the same `dummy_mcp_server.py` fixture used in tests) configured in `mcp_servers.json`, with no connection warnings logged. Later re-verified against a real remote `streamable_http` MCP server (a public test/demo server), discovering 4 real tools with no code changes needed.
+- **Real end-to-end LLM round trip**: verified against a locally-run Ollama instance (model `qwen3:4b`, served over its OpenAI-compatible endpoint at `http://localhost:11434/v1`) — the agent correctly called `write_file` then `read_file` as real tool calls in response to a natural-language instruction, and the file was confirmed to actually exist in the sandbox afterward.
+- **`GET /mcp/status`**: verified live, returning the real connected server and its 4 discovered tool names.
 
 ## Deferred (not built, by design)
 

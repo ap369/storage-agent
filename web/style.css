@@ -9,6 +9,33 @@ body {
   box-sizing: border-box;
 }
 
+#mcp-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding-bottom: 0.75rem;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.mcp-badge {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+}
+
+.mcp-badge.connected {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.mcp-badge.disconnected {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
 #log {
   flex: 1;
   overflow-y: auto;

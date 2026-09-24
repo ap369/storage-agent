@@ -8,9 +8,10 @@ from agent.openai_client import build_openai_client
 from agent.prompt import build_system_prompt
 from agent.registry import build_registry
 from agent.tools.files import build_file_tools
-from agent.tools.mcp import build_mcp_tools
+from agent.tools.mcp import build_mcp_tools, summarize_connections
 from agent.tools.rest import build_rest_tools
 from api.chat import router as chat_router
+from api.mcp_status import router as mcp_status_router
 from api.tasks import router as tasks_router
 from settings import Settings
 from storage.db import (
@@ -44,6 +45,7 @@ async def lifespan(app: FastAPI):
     await seed_mcp_servers(app.state.db, Path(settings.MCP_SERVERS_PATH))
     mcp_servers = await list_enabled_mcp_servers(app.state.db)
     mcp_tools = await build_mcp_tools(mcp_servers, mcp_stack)
+    app.state.mcp_status = summarize_connections(mcp_servers, mcp_tools)
 
     app.state.registry = build_registry(file_tools, rest_tools, mcp_tools)
 
@@ -60,4 +62,5 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(chat_router)
 app.include_router(tasks_router)
+app.include_router(mcp_status_router)
 app.mount("/", StaticFiles(directory="web", html=True), name="web")

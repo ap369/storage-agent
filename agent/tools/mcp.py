@@ -60,6 +60,24 @@ async def _connect(config: dict[str, Any], stack: AsyncExitStack) -> ClientSessi
     return session
 
 
+def summarize_connections(
+    configs: list[dict[str, Any]], tools: list[Tool]
+) -> list[dict[str, Any]]:
+    summaries = []
+    for config in configs:
+        prefix = f"mcp_{config['name']}_"
+        matching = [t.name for t in tools if t.name.startswith(prefix)]
+        summaries.append(
+            {
+                "name": config["name"],
+                "transport": config["transport"],
+                "connected": bool(matching),
+                "tools": matching,
+            }
+        )
+    return summaries
+
+
 def _wrap(server_name: str, session: ClientSession, mcp_tool: Any) -> Tool:
     async def execute(args: dict[str, Any]) -> str:
         result = await session.call_tool(mcp_tool.name, arguments=args)

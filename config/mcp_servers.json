@@ -1,1 +1,7 @@
-[]
+[
+  {
+    "name": "mcp_playground",
+    "transport": "streamable_http",
+    "url": "https://mcpplaygroundonline.com/mcp-complex-server"
+  }
+]

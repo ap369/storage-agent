@@ -2,7 +2,7 @@ import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 
-from agent.tools.mcp import build_mcp_tools
+from agent.tools.mcp import build_mcp_tools, summarize_connections
 
 FIXTURE_SERVER = str(Path(__file__).parent / "fixtures" / "dummy_mcp_server.py")
 
@@ -59,3 +59,23 @@ async def test_unknown_transport_is_skipped():
         tools = await build_mcp_tools([bad_config], stack)
 
         assert tools == []
+
+
+async def test_summarize_connections_reports_connected_and_failed_servers():
+    bad_config = {
+        "name": "broken",
+        "transport": "stdio",
+        "command": "this-command-does-not-exist",
+        "args": [],
+        "env": None,
+    }
+    good_config = make_stdio_config(name="dummy")
+
+    async with AsyncExitStack() as stack:
+        tools = await build_mcp_tools([bad_config, good_config], stack)
+        summary = summarize_connections([bad_config, good_config], tools)
+
+    assert summary == [
+        {"name": "broken", "transport": "stdio", "connected": False, "tools": []},
+        {"name": "dummy", "transport": "stdio", "connected": True, "tools": ["mcp_dummy_add"]},
+    ]

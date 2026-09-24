@@ -1,6 +1,7 @@
 const log = document.getElementById("log");
 const composer = document.getElementById("composer");
 const contentInput = document.getElementById("content");
+const mcpStatusEl = document.getElementById("mcp-status");
 
 let conversationId = null;
 
@@ -37,6 +38,36 @@ function getToken() {
   }
   return token;
 }
+
+function renderMcpStatus(servers) {
+  mcpStatusEl.replaceChildren();
+  if (!servers.length) {
+    mcpStatusEl.textContent = "No MCP servers configured";
+    return;
+  }
+  for (const server of servers) {
+    const badge = document.createElement("span");
+    badge.className = `mcp-badge ${server.connected ? "connected" : "disconnected"}`;
+    badge.textContent = server.connected
+      ? `${server.name} (${server.tools.length} tools)`
+      : `${server.name} (disconnected)`;
+    mcpStatusEl.appendChild(badge);
+  }
+}
+
+async function loadMcpStatus() {
+  try {
+    const response = await fetch("/mcp/status", {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!response.ok) throw new Error(`status ${response.status}`);
+    renderMcpStatus(await response.json());
+  } catch (err) {
+    mcpStatusEl.textContent = "MCP status unavailable";
+  }
+}
+
+loadMcpStatus();
 
 const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const socket = new WebSocket(`${protocol}//${window.location.host}/ws/chat`);

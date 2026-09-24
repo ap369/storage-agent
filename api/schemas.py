@@ -19,3 +19,10 @@ class TaskStatusResponse(BaseModel):
     created_at: str
     started_at: str | None
     finished_at: str | None
+
+
+class MCPServerStatus(BaseModel):
+    name: str
+    transport: str
+    connected: bool
+    tools: list[str]
