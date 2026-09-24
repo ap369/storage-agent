@@ -170,7 +170,7 @@ The original `api/chat.py` only caught `ToolTurnLimitExceeded` around `run_conve
 ## Webview UX additions
 
 - **Thinking indicator** (`web/chat.js`): local models can take tens of seconds per turn with no intermediate output, which looked indistinguishable from the app being broken. A pulsing "thinking…" line now appears immediately after sending a message and after each `tool_result` (since the loop goes back to the model), and disappears the instant any server event arrives.
-- **MCP status panel** (`web/index.html` `#mcp-status`, rendered by `chat.js::loadMcpStatus()`): on page load, fetches `GET /mcp/status` (using the same cached token as the WebSocket) and renders one badge per configured MCP server — green "name (N tools)" if connected, red "name (disconnected)" otherwise.
+- **MCP status side panel** (`web/index.html` `#sidebar` / `#mcp-status`, rendered by `chat.js::loadMcpStatus()`/`renderMcpStatus()`): the page layout is a fixed-width left sidebar plus a chat main panel. On page load, the sidebar fetches `GET /mcp/status` (using the same cached token as the WebSocket) and renders one entry per configured MCP server — a status dot (● connected / ○ disconnected) plus name, with the full list of its discovered tools shown underneath when connected. Display-only by design (no enable/disable toggle) — an earlier design question confirmed this narrower scope over live connect/disconnect, which would need per-server connection lifecycle management instead of the current startup-only shared `AsyncExitStack`.
 
 ## Data model (SQLite)
 

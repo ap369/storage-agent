@@ -6,12 +6,19 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <div id="mcp-status"></div>
-  <div id="log"></div>
-  <form id="composer">
-    <input id="content" type="text" placeholder="Message storage-agent..." autocomplete="off" />
-    <button type="submit">Send</button>
-  </form>
+  <div id="page">
+    <aside id="sidebar">
+      <h2>MCP Servers</h2>
+      <div id="mcp-status"></div>
+    </aside>
+    <main id="chat-panel">
+      <div id="log"></div>
+      <form id="composer">
+        <input id="content" type="text" placeholder="Message storage-agent..." autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+    </main>
+  </div>
   <script src="/chat.js"></script>
 </body>
 </html>

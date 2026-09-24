@@ -1,39 +1,83 @@
 body {
   font-family: system-ui, sans-serif;
+  margin: 0;
+  height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+}
+
+#page {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+#sidebar {
+  width: 220px;
+  flex: 0 0 220px;
+  overflow-y: auto;
+  padding: 1rem;
+  box-sizing: border-box;
+  background: #f8fafc;
+  border-right: 1px solid #e2e8f0;
+}
+
+#sidebar h2 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  margin: 0 0 0.75rem;
+}
+
+.mcp-empty {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.mcp-server {
+  margin-bottom: 1rem;
+  font-size: 0.8rem;
+}
+
+.mcp-server-name {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.mcp-server.connected .mcp-server-name {
+  color: #166534;
+}
+
+.mcp-server.disconnected .mcp-server-name {
+  color: #b91c1c;
+}
+
+.mcp-server-status {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.mcp-tool-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+  color: #475569;
+}
+
+.mcp-tool-list li {
+  word-break: break-word;
+}
+
+#chat-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   max-width: 720px;
   margin: 0 auto;
   padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
   box-sizing: border-box;
-}
-
-#mcp-status {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  padding-bottom: 0.75rem;
-  font-size: 0.8rem;
-  color: #64748b;
-}
-
-.mcp-badge {
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  border: 1px solid #e2e8f0;
-}
-
-.mcp-badge.connected {
-  color: #166534;
-  background: #f0fdf4;
-  border-color: #bbf7d0;
-}
-
-.mcp-badge.disconnected {
-  color: #b91c1c;
-  background: #fef2f2;
-  border-color: #fecaca;
+  height: 100%;
 }
 
 #log {

@@ -42,16 +42,38 @@ function getToken() {
 function renderMcpStatus(servers) {
   mcpStatusEl.replaceChildren();
   if (!servers.length) {
-    mcpStatusEl.textContent = "No MCP servers configured";
+    const empty = document.createElement("div");
+    empty.className = "mcp-empty";
+    empty.textContent = "No MCP servers configured";
+    mcpStatusEl.appendChild(empty);
     return;
   }
   for (const server of servers) {
-    const badge = document.createElement("span");
-    badge.className = `mcp-badge ${server.connected ? "connected" : "disconnected"}`;
-    badge.textContent = server.connected
-      ? `${server.name} (${server.tools.length} tools)`
-      : `${server.name} (disconnected)`;
-    mcpStatusEl.appendChild(badge);
+    const entry = document.createElement("div");
+    entry.className = `mcp-server ${server.connected ? "connected" : "disconnected"}`;
+
+    const name = document.createElement("div");
+    name.className = "mcp-server-name";
+    name.textContent = `${server.connected ? "●" : "○"} ${server.name}`;
+    entry.appendChild(name);
+
+    if (server.connected) {
+      const tools = document.createElement("ul");
+      tools.className = "mcp-tool-list";
+      for (const toolName of server.tools) {
+        const item = document.createElement("li");
+        item.textContent = toolName;
+        tools.appendChild(item);
+      }
+      entry.appendChild(tools);
+    } else {
+      const status = document.createElement("div");
+      status.className = "mcp-server-status";
+      status.textContent = "disconnected";
+      entry.appendChild(status);
+    }
+
+    mcpStatusEl.appendChild(entry);
   }
 }
 

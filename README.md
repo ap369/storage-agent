@@ -109,7 +109,7 @@ Discovered tools are namespaced as `mcp_<server_name>_<tool_name>` to avoid coll
 uv run uvicorn main:app --reload
 ```
 
-Open `http://localhost:8000/` for the chat webview (it'll prompt for `API_TOKEN` on first connect and remember it in `localStorage`).
+Open `http://localhost:8000/` for the chat webview (it'll prompt for `API_TOKEN` on first connect and remember it in `localStorage`). The left sidebar lists every configured MCP server with its connection status and discovered tools — it's display-only, there's no toggle to enable/disable a server from the UI.
 
 ## Using the trigger API
 
@@ -123,6 +123,9 @@ curl -X POST http://localhost:8000/tasks \
 
 # Poll for the result
 curl http://localhost:8000/tasks/<task_id> -H "Authorization: Bearer $API_TOKEN"
+
+# List configured MCP servers and their discovered tools (same data the webview sidebar shows)
+curl http://localhost:8000/mcp/status -H "Authorization: Bearer $API_TOKEN"
 ```
 
 ## Running tests
@@ -190,6 +193,6 @@ api/                 WebSocket chat + trigger REST API
 storage/             SQLite schema and access layer
 web/                 Static chat webview (no build step)
 config/              system_prompt.md, api_allowlist.json, mcp_servers.json
-tests/               78 tests covering every module
+tests/               83 tests covering every module
 docs/superpowers/specs/   Design spec
 ```
