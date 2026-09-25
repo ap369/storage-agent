@@ -1,7 +1,9 @@
 import logging
+import ssl
 from contextlib import AsyncExitStack
 from typing import Any
 
+import certifi
 import httpx2
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
@@ -11,6 +13,16 @@ from mcp.client.streamable_http import streamable_http_client
 from agent.tools.base import Tool, guard_errors
 
 logger = logging.getLogger(__name__)
+
+
+def certifi_ssl_context() -> ssl.SSLContext:
+    # httpx2 (the mcp SDK's HTTP transport) defaults to verifying certificates
+    # against the OS-native trust store via the `truststore` package. That store
+    # can be incomplete or outdated on some machines even for a genuinely valid
+    # certificate, causing CERTIFICATE_VERIFY_FAILED errors that don't reproduce
+    # elsewhere. Using certifi's bundled CA list instead gives consistent
+    # verification behavior across environments.
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 async def build_mcp_tools(configs: list[dict[str, Any]], stack: AsyncExitStack) -> list[Tool]:
@@ -39,18 +51,27 @@ async def _connect(config: dict[str, Any], stack: AsyncExitStack) -> ClientSessi
         )
         read, write = await stack.enter_async_context(stdio_client(params))
     elif transport == "streamable_http":
-        http_client = None
-        headers = config.get("headers")
-        if headers:
-            # the streamable_http transport requires the httpx2 client type specifically,
-            # not the httpx package used elsewhere in this project
-            http_client = await stack.enter_async_context(httpx2.AsyncClient(headers=headers))
+        # the streamable_http transport requires the httpx2 client type specifically,
+        # not the httpx package used elsewhere in this project. Always build our own
+        # client (rather than only when headers are set) so we always control verify=.
+        http_client = await stack.enter_async_context(
+            httpx2.AsyncClient(headers=config.get("headers"), verify=certifi_ssl_context())
+        )
         read, write = await stack.enter_async_context(
             streamable_http_client(config["url"], http_client=http_client)
         )
     elif transport == "sse":
+        def _sse_http_client_factory(headers=None, timeout=None, auth=None):
+            return httpx2.AsyncClient(
+                headers=headers, timeout=timeout, auth=auth, verify=certifi_ssl_context()
+            )
+
         read, write = await stack.enter_async_context(
-            sse_client(config["url"], headers=config.get("headers"))
+            sse_client(
+                config["url"],
+                headers=config.get("headers"),
+                httpx_client_factory=_sse_http_client_factory,
+            )
         )
     else:
         raise ValueError(f"unknown MCP transport: {transport!r}")

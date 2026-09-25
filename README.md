@@ -193,6 +193,6 @@ api/                 WebSocket chat + trigger REST API
 storage/             SQLite schema and access layer
 web/                 Static chat webview (no build step)
 config/              system_prompt.md, api_allowlist.json, mcp_servers.json
-tests/               83 tests covering every module
+tests/               85 tests covering every module
 docs/superpowers/specs/   Design spec
 ```
