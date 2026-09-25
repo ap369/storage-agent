@@ -1,9 +1,8 @@
-import ssl
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 
-from agent.tools.mcp import build_mcp_tools, certifi_ssl_context, summarize_connections
+from agent.tools.mcp import build_mcp_tools, summarize_connections
 
 FIXTURE_SERVER = str(Path(__file__).parent / "fixtures" / "dummy_mcp_server.py")
 
@@ -80,18 +79,3 @@ async def test_summarize_connections_reports_connected_and_failed_servers():
         {"name": "broken", "transport": "stdio", "connected": False, "tools": []},
         {"name": "dummy", "transport": "stdio", "connected": True, "tools": ["mcp_dummy_add"]},
     ]
-
-
-def test_certifi_ssl_context_is_a_real_ssl_context_with_loaded_ca_certs():
-    ctx = certifi_ssl_context()
-
-    assert isinstance(ctx, ssl.SSLContext)
-    assert len(ctx.get_ca_certs()) > 0
-
-
-def test_certifi_ssl_context_is_not_the_truststore_os_backed_context():
-    import truststore
-
-    ctx = certifi_ssl_context()
-
-    assert not isinstance(ctx, truststore.SSLContext)

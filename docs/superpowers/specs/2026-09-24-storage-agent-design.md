@@ -83,7 +83,7 @@ storage-agent/
     storage_agent.db
     sandbox/                     # default SANDBOX_ROOT
 
-  tests/                         # 85 tests, all passing
+  tests/                         # 83 tests, all passing
     test_sandbox_traversal.py
     test_files_tool.py
     test_tool_base.py
@@ -159,7 +159,9 @@ Uses the official `mcp` Python SDK (installed version: `mcp==2.2.0`; note this S
 - `streamable_http`: `streamable_http_client(url, http_client=...)`. **Implementation note discovered while building this**: this transport's `http_client` parameter requires an instance of the separate `httpx2` package (not the `httpx` package used everywhere else in this project) — that's what the installed `mcp` SDK's transport layer is built on.
 - `sse`: `sse_client(url, headers=..., httpx_client_factory=...)` (kept only as a legacy fallback).
 
-**TLS verification note (bug fix)**: `httpx2`'s default `verify=True` builds its SSL context via `truststore.SSLContext(...)` — i.e. it verifies against the *OS-native* certificate trust store, not a bundled CA list. Traced this by reading `httpx2._config.create_ssl_context()` after a report of `CERTIFICATE_VERIFY_FAILED` connecting to a remote `streamable_http` MCP server on a different machine, where the certificate itself was independently confirmed valid (checked with `openssl s_client`) and the same connection succeeded from this development machine — the signature of an incomplete/outdated OS trust store on that other machine, not a real certificate problem. `agent/tools/mcp.py::certifi_ssl_context()` now builds an explicit `ssl.SSLContext` from `certifi`'s bundled CA list, and both the `streamable_http` and `sse` code paths always construct their own `httpx2.AsyncClient`/client-factory with `verify=certifi_ssl_context()` — previously `streamable_http` only built its own client when `headers` was set, silently falling through to the SDK's OS-trust-store default otherwise. This gives consistent, environment-independent verification behavior. Covered by `tests/test_mcp_tool.py::test_certifi_ssl_context_is_a_real_ssl_context_with_loaded_ca_certs` and `::test_certifi_ssl_context_is_not_the_truststore_os_backed_context`; re-verified live against the real remote MCP server afterward (same 4 tools discovered, no regression).
+**TLS verification note — SECURITY TRADEOFF, deliberately accepted**: `httpx2`'s default `verify=True` builds its SSL context via `truststore.SSLContext(...)` — i.e. it verifies against the *OS-native* certificate trust store, not a bundled CA list. This was traced (by reading `httpx2._config.create_ssl_context()`) as the cause of a `CERTIFICATE_VERIFY_FAILED` error connecting to a remote `streamable_http` MCP server from one particular machine, while the certificate itself was independently confirmed valid (checked with `openssl s_client`) and the same connection succeeded from the development machine — the signature of an incomplete/outdated OS trust store on that other machine, not a real certificate problem.
+
+A first fix (`certifi_ssl_context()`, building an explicit `ssl.SSLContext` from `certifi`'s bundled CA list) was implemented, tested, and verified working, but was then manually overridden by the user to `verify=False` on both the `streamable_http` and `sse` code paths in `agent/tools/mcp.py` instead. **`verify=False` disables TLS certificate verification entirely for every `streamable_http`/`sse` MCP connection this app makes — not scoped to one server, not a trust-store swap, an outright removal of verification.** This was flagged explicitly (broken tests from the edit, and the MITM risk) and the user confirmed they want it kept this way. It is documented here, in code comments at both call sites, so this isn't mistaken for an oversight later. Anyone deploying this against untrusted networks or servers they don't fully control should reintroduce certificate verification (the removed `certifi_ssl_context()` approach is the straightforward way back, see git history) or scope the bypass to specific trusted servers only, rather than relying on this default.
 
 All connections are long-lived async context managers entered into one `AsyncExitStack` created during FastAPI's `lifespan` (`main.py`) and closed on shutdown. Each server connection is attempted independently with its own try/except in `build_mcp_tools` — a failing server is logged (`logger.warning(..., exc_info=True)`) and skipped, it never blocks the rest of the app or other servers from starting. Verified with `tests/test_mcp_tool.py` against a real local stdio server (`tests/fixtures/dummy_mcp_server.py`) and against a deliberately-broken server config in the same run.
 
@@ -206,7 +208,7 @@ Target Python 3.12 via `uv venv --python 3.12` (managed automatically by `uv`).
 
 ## Verification performed
 
-All 85 automated tests pass (`uv run pytest`), written test-first throughout. In addition:
+All 83 automated tests pass (`uv run pytest`), written test-first throughout. In addition:
 
 - **Milestone 1**: server starts, static webview serves, WebSocket auth handshake rejects a wrong token and accepts the correct one.
 - **Milestone 2**: `POST /tasks` without a token → `401`; with a token → `202` + `task_id`; polling `GET /tasks/{id}` showed the real `pending → running → failed` lifecycle (failure expected — the smoke test used a placeholder, unreachable `LLM_BASE_URL`) with the connection error captured in `error`, proving the background task never crashes the server.
