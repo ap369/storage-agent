@@ -29,7 +29,7 @@ Browser ──WS──▶ Chat Webview (WebSocket) ─┐
 External ──REST─▶ Trigger API (POST/GET) ─┘         │                                                  ├─▶ REST tools (allowlist)
 Script                                              ▼                                                  └─▶ MCP tools (stdio/HTTP)
                                               SQLite (conversations, messages,
-                                              tasks, api_configs, mcp_servers)
+                                              tasks, api_configs)
                                                      │
                                               OpenAI-compatible chat completions
                                               endpoint (user's own base_url + key)
@@ -51,7 +51,7 @@ storage-agent/
   config/
     system_prompt.md             # static system prompt
     api_allowlist.json           # seed data -> api_configs table (starts empty: [])
-    mcp_servers.json              # seed data -> mcp_servers table (starts empty: [])
+    mcp_servers.json              # read directly at startup, no DB round-trip (starts empty: [])
 
   agent/
     core.py                      # run_conversation() - the LLM tool-calling loop
@@ -83,7 +83,7 @@ storage-agent/
     storage_agent.db
     sandbox/                     # default SANDBOX_ROOT
 
-  tests/                         # 83 tests, all passing
+  tests/                         # 84 tests, all passing
     test_sandbox_traversal.py
     test_files_tool.py
     test_tool_base.py
@@ -118,16 +118,16 @@ class Tool:
 `base.py` also provides `guard_errors(fn)`, which wraps a tool's inner async function so any exception becomes an `"Error: ..."` string result instead of propagating — every tool source (files, REST, MCP) uses it, so a bad path, a failed HTTP call, or an unreachable MCP tool never crashes the agent loop.
 
 - `agent/tools/files.py::build_file_tools(sandbox_root)` — builds `list_dir`, `search_files`, `read_file`, `write_file`, `edit_file`, `delete_file`, `move_file` as closures over `sandbox_root`.
-- `agent/tools/rest.py::build_rest_tools(configs)` — one `Tool` per `(api_config, operation)` pair, named `{config_name}_{operation_name}`.
+- `agent/tools/rest.py::build_rest_tools(configs, stack)` — one `Tool` per `(api_config, operation)` pair, named `{config_name}_{operation_name}`. **Optimization**: builds exactly one pooled `httpx.AsyncClient` per `api_config` (entered into the shared `resources_stack`, same lifecycle pattern as MCP connections) and reuses it across every operation/call for that config, instead of opening a fresh connection (and TLS handshake, for HTTPS APIs) on every single tool invocation. Covered by `tests/test_rest_tool.py::test_builds_one_http_client_per_config_shared_across_operations`, which spies on `httpx.AsyncClient.__init__` to prove construction count stays at 1 regardless of operation count.
 - `agent/tools/mcp.py::build_mcp_tools(configs, stack)` — connects to each configured MCP server, lists its tools, wraps each as a `Tool` named `mcp_{server_name}_{tool_name}`.
-- `agent/registry.py::build_registry(*tool_groups)` — aggregates everything into one list + a `by_name` dict; raises `DuplicateToolName` at startup on any name collision (fail fast, not silent shadowing).
+- `agent/registry.py::build_registry(*tool_groups)` — aggregates everything into one list + a `by_name` dict; raises `DuplicateToolName` at startup on any name collision (fail fast, not silent shadowing). **Optimization**: also precomputes `registry.tool_specs` (each tool's OpenAI function-call spec via `to_openai_spec()`) once here, since the tool set is fixed for the process lifetime — `run_conversation()` previously rebuilt this list from scratch on every single call (every chat message, every triggered task), which was pure repeated work for data that never changes after startup.
 - `agent/tools/mcp.py::summarize_connections(configs, tools)` — pure function, no new connection attempts. For each configured MCP server, checks whether any tool in the already-built `tools` list carries that server's `mcp_{name}_` prefix, and reports `{name, transport, connected, tools}`. Computed once at startup and stored on `app.state.mcp_status` for `GET /mcp/status` to serve.
 
 ## The agent core loop
 
 `agent/core.py::run_conversation(client, registry, system_prompt, history, max_turns, on_event)`:
 
-1. Prepends `system_prompt` to `history` and converts `registry.tools` to OpenAI function-call specs.
+1. Prepends `system_prompt` to `history`, using `registry.tool_specs` (precomputed once — see above, not rebuilt per call).
 2. Calls `client.complete(messages, tools)`. `client` is anything implementing the `LLMClient` protocol (`agent/llm.py`) — decoupled from the OpenAI SDK so the loop is unit-testable with a fake client.
 3. If the model returns no tool calls, fires an `on_event({"type": "final", ...})` and returns the content.
 4. Otherwise, for each requested tool call: fires `tool_call`/`tool_result` events, looks up the tool by name (unknown tool name → an `"Error: unknown tool ..."` string, not a crash), executes it, and appends the result as a `role: tool` message. Loops back to step 2.
@@ -163,7 +163,7 @@ Uses the official `mcp` Python SDK (installed version: `mcp==2.2.0`; note this S
 
 A first fix (`certifi_ssl_context()`, building an explicit `ssl.SSLContext` from `certifi`'s bundled CA list) was implemented, tested, and verified working, but was then manually overridden by the user to `verify=False` on both the `streamable_http` and `sse` code paths in `agent/tools/mcp.py` instead. **`verify=False` disables TLS certificate verification entirely for every `streamable_http`/`sse` MCP connection this app makes — not scoped to one server, not a trust-store swap, an outright removal of verification.** This was flagged explicitly (broken tests from the edit, and the MITM risk) and the user confirmed they want it kept this way. It is documented here, in code comments at both call sites, so this isn't mistaken for an oversight later. Anyone deploying this against untrusted networks or servers they don't fully control should reintroduce certificate verification (the removed `certifi_ssl_context()` approach is the straightforward way back, see git history) or scope the bypass to specific trusted servers only, rather than relying on this default.
 
-All connections are long-lived async context managers entered into one `AsyncExitStack` created during FastAPI's `lifespan` (`main.py`) and closed on shutdown. Each server connection is attempted independently with its own try/except in `build_mcp_tools` — a failing server is logged (`logger.warning(..., exc_info=True)`) and skipped, it never blocks the rest of the app or other servers from starting. Verified with `tests/test_mcp_tool.py` against a real local stdio server (`tests/fixtures/dummy_mcp_server.py`) and against a deliberately-broken server config in the same run.
+All connections are long-lived async context managers entered into `app.state.resources_stack` (an `AsyncExitStack` created during FastAPI's `lifespan` in `main.py`) and closed together on shutdown — this same stack also holds the pooled REST `httpx.AsyncClient`s, see the REST allowlist section above. Each server connection is attempted independently with its own try/except in `build_mcp_tools` — a failing server is logged (`logger.warning(..., exc_info=True)`) and skipped, it never blocks the rest of the app or other servers from starting. Verified with `tests/test_mcp_tool.py` against a real local stdio server (`tests/fixtures/dummy_mcp_server.py`) and against a deliberately-broken server config in the same run.
 
 Discovered MCP tools are wrapped using the SDK's actual (snake_case) attribute names: `mcp_tool.name`, `mcp_tool.description`, `mcp_tool.input_schema` (the JSON alias `inputSchema` is not the Python attribute name in this SDK version), and `CallToolResult.content` items exposing `.text` for text blocks.
 
@@ -182,16 +182,17 @@ The original `api/chat.py` only caught `ToolTurnLimitExceeded` around `run_conve
 - `messages(id, conversation_id, role, content, tool_calls, tool_call_id, name, created_at)` — `get_conversation_messages()` omits any `None`-valued fields per row, so the returned dicts are directly usable as OpenAI-format chat messages without extra cleanup.
 - `tasks(id, status['pending'|'running'|'completed'|'failed'], input, result, error, conversation_id, created_at, started_at, finished_at)`
 - `api_configs(name, description, base_url, auth_type, auth_value, auth_header_name, operations, enabled, created_at)`
-- `mcp_servers(name, transport, command, args, env, url, headers, enabled, created_at)`
 
-`config/*.json` are seed inputs; on startup `seed_api_configs()`/`seed_mcp_servers()` idempotently upsert them into their tables (`INSERT ... ON CONFLICT(name) DO UPDATE`). The running app reads tool definitions from SQLite, not the files directly — a clean seam for a future admin API to edit rows without touching files.
+`config/api_allowlist.json` is a seed input; on startup `seed_api_configs()` idempotently upserts it into `api_configs` (`INSERT ... ON CONFLICT(name) DO UPDATE`). The running app reads REST tool definitions from SQLite, not the file directly — a clean seam for a future admin API to edit rows without touching files.
+
+**MCP servers are intentionally *not* DB-backed** (revised from an earlier version of this design that did mirror `mcp_servers.json` into a SQLite table the same way `api_configs` works). Asked directly why an "MCPs list" existed in the database, the honest answer was: it existed only to leave a seam for a future runtime admin/toggle API, but that feature was explicitly never built (the status panel is display-only, see above) — so the table was dead weight, always fully overwritten from the JSON file on every startup with no code path ever diverging it. `agent/tools/mcp.py::load_mcp_server_configs(path)` now reads and `${ENV_VAR}`-interpolates `config/mcp_servers.json` directly at startup, with no SQLite round-trip at all. If a future MCP admin/toggle API is actually built, `api_configs`' pattern (DB-backed, JSON as seed) is the template to follow at that point — don't add the indirection back speculatively before it's needed.
 
 ## API surface
 
 - **`WebSocket /ws/chat`**: client's first frame must be `{"token": "..."}` (else `{"type": "error", "message": "unauthorized"}` then closed with code 4401). Then exchanges `{"type": "message", "conversation_id": "<uuid|null>", "content": "..."}` for streamed `{"type": "tool_call"|"tool_result"|"final"|"error", ...}` frames. A `null` `conversation_id` creates a new conversation; the server's own `final` event (not the core loop's) carries the `conversation_id` so the client can persist it for the next message.
 - **`POST /tasks`** (`Authorization: Bearer <token>`, body `{"input": "..."}`) → creates a task + conversation row, runs the agent loop as a background `asyncio.create_task`, returns `202` `{"task_id", "status": "pending"}` immediately.
 - **`GET /tasks/{task_id}`** (same auth) → `{"task_id", "status", "input", "result", "error", "created_at", "started_at", "finished_at"}`, `404` if unknown. A task interrupted by a server restart stays `running` rather than resuming (acceptable for v1; not retried automatically). A background task's own exceptions are always caught and recorded as `status="failed"`, `error=str(exc)` — verified live against an unreachable LLM endpoint.
-- **`GET /mcp/status`** (same auth) → `list[{"name", "transport", "connected", "tools"}]`, one entry per configured MCP server (regardless of whether it connected successfully), computed once at startup from `summarize_connections()`. Surfaced in the webview as a row of badges above the chat log.
+- **`GET /mcp/status`** (same auth) → `list[{"name", "transport", "connected", "tools"}]`, one entry per configured MCP server (regardless of whether it connected successfully), computed once at startup from `summarize_connections()`. Surfaced in the webview's sidebar (see Webview UX additions above).
 
 ## Config
 
@@ -208,7 +209,7 @@ Target Python 3.12 via `uv venv --python 3.12` (managed automatically by `uv`).
 
 ## Verification performed
 
-All 83 automated tests pass (`uv run pytest`), written test-first throughout. In addition:
+All 84 automated tests pass (`uv run pytest`), written test-first throughout. In addition:
 
 - **Milestone 1**: server starts, static webview serves, WebSocket auth handshake rejects a wrong token and accepts the correct one.
 - **Milestone 2**: `POST /tasks` without a token → `401`; with a token → `202` + `task_id`; polling `GET /tasks/{id}` showed the real `pending → running → failed` lifecycle (failure expected — the smoke test used a placeholder, unreachable `LLM_BASE_URL`) with the connection error captured in `error`, proving the background task never crashes the server.

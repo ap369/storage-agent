@@ -1,8 +1,9 @@
+import json
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 
-from agent.tools.mcp import build_mcp_tools, summarize_connections
+from agent.tools.mcp import build_mcp_tools, load_mcp_server_configs, summarize_connections
 
 FIXTURE_SERVER = str(Path(__file__).parent / "fixtures" / "dummy_mcp_server.py")
 
@@ -79,3 +80,58 @@ async def test_summarize_connections_reports_connected_and_failed_servers():
         {"name": "broken", "transport": "stdio", "connected": False, "tools": []},
         {"name": "dummy", "transport": "stdio", "connected": True, "tools": ["mcp_dummy_add"]},
     ]
+
+
+def test_load_mcp_server_configs_interpolates_env_vars(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMOTE_MCP_TOKEN", "xyz789")
+    config_path = tmp_path / "mcp_servers.json"
+    config_path.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "local_tools",
+                    "transport": "stdio",
+                    "command": "python",
+                    "args": ["server.py"],
+                    "env": {"FOO": "bar"},
+                },
+                {
+                    "name": "remote_tools",
+                    "transport": "streamable_http",
+                    "url": "https://mcp.example.com",
+                    "headers": {"Authorization": "Bearer ${REMOTE_MCP_TOKEN}"},
+                },
+            ]
+        )
+    )
+
+    configs = load_mcp_server_configs(config_path)
+
+    assert len(configs) == 2
+
+    local = next(c for c in configs if c["name"] == "local_tools")
+    assert local["transport"] == "stdio"
+    assert local["command"] == "python"
+    assert local["args"] == ["server.py"]
+    assert local["env"] == {"FOO": "bar"}
+
+    remote = next(c for c in configs if c["name"] == "remote_tools")
+    assert remote["transport"] == "streamable_http"
+    assert remote["url"] == "https://mcp.example.com"
+    assert remote["headers"] == {"Authorization": "Bearer xyz789"}
+
+
+def test_load_mcp_server_configs_excludes_disabled(tmp_path):
+    config_path = tmp_path / "mcp_servers.json"
+    config_path.write_text(
+        json.dumps(
+            [
+                {"name": "a", "transport": "stdio", "command": "python", "args": [], "enabled": True},
+                {"name": "b", "transport": "stdio", "command": "python", "args": [], "enabled": False},
+            ]
+        )
+    )
+
+    configs = load_mcp_server_configs(config_path)
+
+    assert [c["name"] for c in configs] == ["a"]

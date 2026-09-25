@@ -52,17 +52,6 @@ CREATE TABLE IF NOT EXISTS api_configs (
     created_at       TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS mcp_servers (
-    name        TEXT PRIMARY KEY,
-    transport   TEXT NOT NULL,
-    command     TEXT,
-    args        TEXT,
-    env         TEXT,
-    url         TEXT,
-    headers     TEXT,
-    enabled     INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL
-);
 """
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{(\w+)\}")
@@ -209,68 +198,6 @@ async def seed_api_configs(db: aiosqlite.Connection, path: Path) -> None:
             ),
         )
     await db.commit()
-
-
-def _interpolate_dict(values: dict[str, str] | None) -> dict[str, str] | None:
-    if values is None:
-        return None
-    return {key: _interpolate_env(value) for key, value in values.items()}
-
-
-async def seed_mcp_servers(db: aiosqlite.Connection, path: Path) -> None:
-    configs = json.loads(Path(path).read_text())
-    for config in configs:
-        await db.execute(
-            """
-            INSERT INTO mcp_servers
-                (name, transport, command, args, env, url, headers, enabled, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(name) DO UPDATE SET
-                transport=excluded.transport,
-                command=excluded.command,
-                args=excluded.args,
-                env=excluded.env,
-                url=excluded.url,
-                headers=excluded.headers,
-                enabled=excluded.enabled
-            """,
-            (
-                config["name"],
-                config["transport"],
-                config.get("command"),
-                json.dumps(config["args"]) if config.get("args") is not None else None,
-                json.dumps(_interpolate_dict(config.get("env"))) if config.get("env") else None,
-                config.get("url"),
-                json.dumps(_interpolate_dict(config.get("headers")))
-                if config.get("headers")
-                else None,
-                int(config.get("enabled", True)),
-                now_iso(),
-            ),
-        )
-    await db.commit()
-
-
-async def list_enabled_mcp_servers(db: aiosqlite.Connection) -> list[dict[str, Any]]:
-    cursor = await db.execute(
-        """
-        SELECT name, transport, command, args, env, url, headers
-        FROM mcp_servers WHERE enabled = 1
-        """
-    )
-    rows = await cursor.fetchall()
-    return [
-        {
-            "name": row["name"],
-            "transport": row["transport"],
-            "command": row["command"],
-            "args": json.loads(row["args"]) if row["args"] else None,
-            "env": json.loads(row["env"]) if row["env"] else None,
-            "url": row["url"],
-            "headers": json.loads(row["headers"]) if row["headers"] else None,
-        }
-        for row in rows
-    ]
 
 
 async def list_enabled_api_configs(db: aiosqlite.Connection) -> list[dict[str, Any]]:

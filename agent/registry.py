@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Any, Iterable
 
-from agent.tools.base import Tool
+from agent.tools.base import Tool, to_openai_spec
 
 
 class DuplicateToolName(Exception):
@@ -12,6 +12,7 @@ class DuplicateToolName(Exception):
 class ToolRegistry:
     tools: list[Tool] = field(default_factory=list)
     by_name: dict[str, Tool] = field(default_factory=dict)
+    tool_specs: list[dict[str, Any]] = field(default_factory=list)
 
 
 def build_registry(*tool_groups: Iterable[Tool]) -> ToolRegistry:
@@ -22,4 +23,5 @@ def build_registry(*tool_groups: Iterable[Tool]) -> ToolRegistry:
                 raise DuplicateToolName(f"duplicate tool name: {tool.name!r}")
             registry.tools.append(tool)
             registry.by_name[tool.name] = tool
+            registry.tool_specs.append(to_openai_spec(tool))
     return registry

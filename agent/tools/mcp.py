@@ -1,5 +1,9 @@
+import json
 import logging
+import os
+import re
 from contextlib import AsyncExitStack
+from pathlib import Path
 from typing import Any
 
 import httpx2
@@ -11,6 +15,37 @@ from mcp.client.streamable_http import streamable_http_client
 from agent.tools.base import Tool, guard_errors
 
 logger = logging.getLogger(__name__)
+
+_ENV_VAR_PATTERN = re.compile(r"\$\{(\w+)\}")
+
+
+def _interpolate_env(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return _ENV_VAR_PATTERN.sub(lambda m: os.environ.get(m.group(1), ""), value)
+
+
+def _interpolate_dict(values: dict[str, str] | None) -> dict[str, str] | None:
+    if values is None:
+        return None
+    return {key: _interpolate_env(value) for key, value in values.items()}
+
+
+def load_mcp_server_configs(path: Path) -> list[dict[str, Any]]:
+    configs = json.loads(Path(path).read_text())
+    return [
+        {
+            "name": config["name"],
+            "transport": config["transport"],
+            "command": config.get("command"),
+            "args": config.get("args"),
+            "env": _interpolate_dict(config.get("env")),
+            "url": config.get("url"),
+            "headers": _interpolate_dict(config.get("headers")),
+        }
+        for config in configs
+        if config.get("enabled", True)
+    ]
 
 
 async def build_mcp_tools(configs: list[dict[str, Any]], stack: AsyncExitStack) -> list[Tool]:

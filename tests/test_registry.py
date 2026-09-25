@@ -23,3 +23,13 @@ def test_aggregates_tools_from_multiple_groups():
 def test_raises_on_duplicate_tool_name():
     with pytest.raises(DuplicateToolName):
         build_registry([make_tool("a")], [make_tool("a")])
+
+
+def test_tool_specs_precomputed_matching_tool_order():
+    registry = build_registry([make_tool("a"), make_tool("b")])
+
+    assert [spec["function"]["name"] for spec in registry.tool_specs] == ["a", "b"]
+    assert registry.tool_specs[0] == {
+        "type": "function",
+        "function": {"name": "a", "description": "d", "parameters": {"type": "object"}},
+    }

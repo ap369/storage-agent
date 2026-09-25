@@ -10,9 +10,7 @@ from storage.db import (
     init_db,
     insert_message,
     list_enabled_api_configs,
-    list_enabled_mcp_servers,
     seed_api_configs,
-    seed_mcp_servers,
     update_task,
 )
 
@@ -28,7 +26,7 @@ async def test_init_db_creates_conversations_and_messages_tables(db):
     cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table'")
     rows = await cursor.fetchall()
     table_names = {row[0] for row in rows}
-    assert {"conversations", "messages", "tasks", "api_configs", "mcp_servers"} <= table_names
+    assert {"conversations", "messages", "tasks", "api_configs"} <= table_names
 
 
 async def test_create_conversation_returns_id_and_persists_source(db):
@@ -182,76 +180,6 @@ async def test_list_enabled_api_configs_excludes_disabled(db, tmp_path):
     configs = await list_enabled_api_configs(db)
 
     assert [c["name"] for c in configs] == ["a"]
-
-
-async def test_seed_mcp_servers_upserts_stdio_and_http_configs(db, tmp_path, monkeypatch):
-    monkeypatch.setenv("REMOTE_MCP_TOKEN", "xyz789")
-    config_path = tmp_path / "mcp_servers.json"
-    config_path.write_text(
-        json.dumps(
-            [
-                {
-                    "name": "local_tools",
-                    "transport": "stdio",
-                    "command": "python",
-                    "args": ["server.py"],
-                    "env": {"FOO": "bar"},
-                },
-                {
-                    "name": "remote_tools",
-                    "transport": "streamable_http",
-                    "url": "https://mcp.example.com",
-                    "headers": {"Authorization": "Bearer ${REMOTE_MCP_TOKEN}"},
-                },
-            ]
-        )
-    )
-
-    await seed_mcp_servers(db, config_path)
-
-    servers = await list_enabled_mcp_servers(db)
-    assert len(servers) == 2
-
-    local = next(s for s in servers if s["name"] == "local_tools")
-    assert local["transport"] == "stdio"
-    assert local["command"] == "python"
-    assert local["args"] == ["server.py"]
-    assert local["env"] == {"FOO": "bar"}
-
-    remote = next(s for s in servers if s["name"] == "remote_tools")
-    assert remote["transport"] == "streamable_http"
-    assert remote["url"] == "https://mcp.example.com"
-    assert remote["headers"] == {"Authorization": "Bearer xyz789"}
-
-
-async def test_seed_mcp_servers_is_idempotent(db, tmp_path):
-    config_path = tmp_path / "mcp_servers.json"
-    config_path.write_text(
-        json.dumps([{"name": "local_tools", "transport": "stdio", "command": "python", "args": []}])
-    )
-
-    await seed_mcp_servers(db, config_path)
-    await seed_mcp_servers(db, config_path)
-
-    servers = await list_enabled_mcp_servers(db)
-    assert len(servers) == 1
-
-
-async def test_list_enabled_mcp_servers_excludes_disabled(db, tmp_path):
-    config_path = tmp_path / "mcp_servers.json"
-    config_path.write_text(
-        json.dumps(
-            [
-                {"name": "a", "transport": "stdio", "command": "python", "args": [], "enabled": True},
-                {"name": "b", "transport": "stdio", "command": "python", "args": [], "enabled": False},
-            ]
-        )
-    )
-
-    await seed_mcp_servers(db, config_path)
-    servers = await list_enabled_mcp_servers(db)
-
-    assert [s["name"] for s in servers] == ["a"]
 
 
 async def test_insert_message_round_trips_tool_call_fields(db):

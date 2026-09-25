@@ -1,3 +1,5 @@
+from contextlib import AsyncExitStack
+
 import httpx
 import respx
 
@@ -33,16 +35,20 @@ def make_config(**overrides):
     return config
 
 
-def get_tool(configs):
-    tools = build_rest_tools(configs)
+async def get_tools(configs, stack):
+    tools = await build_rest_tools(configs, stack)
     return {t.name: t for t in tools}
 
 
-def test_builds_one_tool_per_operation_namespaced_by_config_name():
-    tools = get_tool([make_config()])
-    assert "weather_api_get_forecast" in tools
-    assert tools["weather_api_get_forecast"].description == "Get the forecast for a city"
-    assert tools["weather_api_get_forecast"].parameters == make_config()["operations"][0]["params_schema"]
+async def test_builds_one_tool_per_operation_namespaced_by_config_name():
+    async with AsyncExitStack() as stack:
+        tools = await get_tools([make_config()], stack)
+        assert "weather_api_get_forecast" in tools
+        assert tools["weather_api_get_forecast"].description == "Get the forecast for a city"
+        assert (
+            tools["weather_api_get_forecast"].parameters
+            == make_config()["operations"][0]["params_schema"]
+        )
 
 
 @respx.mock
@@ -50,9 +56,10 @@ async def test_get_substitutes_path_param_and_sends_remaining_as_query():
     route = respx.get("https://weather.example.com/forecast/paris").mock(
         return_value=httpx.Response(200, json={"forecast": "sunny"})
     )
-    tools = get_tool([make_config()])
+    async with AsyncExitStack() as stack:
+        tools = await get_tools([make_config()], stack)
 
-    result = await tools["weather_api_get_forecast"].execute({"city": "paris", "units": "metric"})
+        result = await tools["weather_api_get_forecast"].execute({"city": "paris", "units": "metric"})
 
     assert route.called
     assert route.calls[0].request.url.params["units"] == "metric"
@@ -78,9 +85,10 @@ async def test_post_operation_sends_remaining_args_as_json_body():
     route = respx.post("https://weather.example.com/alerts").mock(
         return_value=httpx.Response(201, json={"id": "1"})
     )
-    tools = get_tool([config])
+    async with AsyncExitStack() as stack:
+        tools = await get_tools([config], stack)
 
-    result = await tools["weather_api_create_alert"].execute({"city": "paris", "threshold": 30})
+        result = await tools["weather_api_create_alert"].execute({"city": "paris", "threshold": 30})
 
     assert route.called
     import json as jsonlib
@@ -95,9 +103,9 @@ async def test_bearer_auth_header_is_injected():
     route = respx.get("https://weather.example.com/forecast/paris").mock(
         return_value=httpx.Response(200, text="ok")
     )
-    tools = get_tool([config])
-
-    await tools["weather_api_get_forecast"].execute({"city": "paris"})
+    async with AsyncExitStack() as stack:
+        tools = await get_tools([config], stack)
+        await tools["weather_api_get_forecast"].execute({"city": "paris"})
 
     assert route.calls[0].request.headers["Authorization"] == "Bearer secret-key"
 
@@ -110,9 +118,9 @@ async def test_api_key_header_auth_is_injected():
     route = respx.get("https://weather.example.com/forecast/paris").mock(
         return_value=httpx.Response(200, text="ok")
     )
-    tools = get_tool([config])
-
-    await tools["weather_api_get_forecast"].execute({"city": "paris"})
+    async with AsyncExitStack() as stack:
+        tools = await get_tools([config], stack)
+        await tools["weather_api_get_forecast"].execute({"city": "paris"})
 
     assert route.calls[0].request.headers["X-Api-Key"] == "secret-key"
 
@@ -122,13 +130,40 @@ async def test_non_2xx_response_returns_error_string_without_raising():
     respx.get("https://weather.example.com/forecast/paris").mock(
         return_value=httpx.Response(500, text="boom")
     )
-    tools = get_tool([make_config()])
+    async with AsyncExitStack() as stack:
+        tools = await get_tools([make_config()], stack)
 
-    result = await tools["weather_api_get_forecast"].execute({"city": "paris"})
+        result = await tools["weather_api_get_forecast"].execute({"city": "paris"})
 
     assert result.startswith("Error:")
 
 
-def test_only_declared_operations_are_exposed_as_tools():
-    tools = get_tool([make_config()])
-    assert len(tools) == 1
+async def test_only_declared_operations_are_exposed_as_tools():
+    async with AsyncExitStack() as stack:
+        tools = await get_tools([make_config()], stack)
+        assert len(tools) == 1
+
+
+async def test_builds_one_http_client_per_config_shared_across_operations(monkeypatch):
+    real_init = httpx.AsyncClient.__init__
+    construction_count = 0
+
+    def spy_init(self, *args, **kwargs):
+        nonlocal construction_count
+        construction_count += 1
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", spy_init)
+
+    config = make_config(
+        operations=[
+            {**make_config()["operations"][0], "name": "get_forecast"},
+            {**make_config()["operations"][0], "name": "get_forecast_alt"},
+        ]
+    )
+
+    async with AsyncExitStack() as stack:
+        tools = await get_tools([config], stack)
+        assert len(tools) == 2
+
+    assert construction_count == 1

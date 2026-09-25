@@ -3,7 +3,6 @@ from typing import Any, Awaitable, Callable
 
 from agent.llm import LLMClient
 from agent.registry import ToolRegistry
-from agent.tools.base import to_openai_spec
 
 OnEvent = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -21,10 +20,9 @@ async def run_conversation(
     on_event: OnEvent | None = None,
 ) -> str:
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}, *history]
-    tool_specs = [to_openai_spec(t) for t in registry.tools]
 
     for _ in range(max_turns):
-        assistant = await client.complete(messages, tool_specs)
+        assistant = await client.complete(messages, registry.tool_specs)
 
         if not assistant.tool_calls:
             if on_event:

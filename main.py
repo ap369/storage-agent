@@ -8,19 +8,13 @@ from agent.openai_client import build_openai_client
 from agent.prompt import build_system_prompt
 from agent.registry import build_registry
 from agent.tools.files import build_file_tools
-from agent.tools.mcp import build_mcp_tools, summarize_connections
+from agent.tools.mcp import build_mcp_tools, load_mcp_server_configs, summarize_connections
 from agent.tools.rest import build_rest_tools
 from api.chat import router as chat_router
 from api.mcp_status import router as mcp_status_router
 from api.tasks import router as tasks_router
 from settings import Settings
-from storage.db import (
-    init_db,
-    list_enabled_api_configs,
-    list_enabled_mcp_servers,
-    seed_api_configs,
-    seed_mcp_servers,
-)
+from storage.db import init_db, list_enabled_api_configs, seed_api_configs
 
 
 @asynccontextmanager
@@ -36,15 +30,17 @@ async def lifespan(app: FastAPI):
 
     file_tools = build_file_tools(sandbox_root)
 
+    # long-lived resources (pooled HTTP clients, MCP connections) that must
+    # outlive the request that created them and be closed together at shutdown
+    resources_stack = AsyncExitStack()
+    app.state.resources_stack = resources_stack
+
     await seed_api_configs(app.state.db, Path(settings.API_ALLOWLIST_PATH))
     api_configs = await list_enabled_api_configs(app.state.db)
-    rest_tools = build_rest_tools(api_configs)
+    rest_tools = await build_rest_tools(api_configs, resources_stack)
 
-    mcp_stack = AsyncExitStack()
-    app.state.mcp_stack = mcp_stack
-    await seed_mcp_servers(app.state.db, Path(settings.MCP_SERVERS_PATH))
-    mcp_servers = await list_enabled_mcp_servers(app.state.db)
-    mcp_tools = await build_mcp_tools(mcp_servers, mcp_stack)
+    mcp_servers = load_mcp_server_configs(Path(settings.MCP_SERVERS_PATH))
+    mcp_tools = await build_mcp_tools(mcp_servers, resources_stack)
     app.state.mcp_status = summarize_connections(mcp_servers, mcp_tools)
 
     app.state.registry = build_registry(file_tools, rest_tools, mcp_tools)
@@ -55,7 +51,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    await mcp_stack.aclose()
+    await resources_stack.aclose()
     await app.state.db.close()
 
 
