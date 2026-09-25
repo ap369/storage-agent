@@ -32,6 +32,7 @@ mkdir -p data/sandbox          # the agent's sandboxed working directory
 | `SYSTEM_PROMPT_PATH` | no | `./config/system_prompt.md` | System prompt loaded once at startup. |
 | `API_ALLOWLIST_PATH` | no | `./config/api_allowlist.json` | Allowlisted REST APIs the agent may call. |
 | `MCP_SERVERS_PATH` | no | `./config/mcp_servers.json` | MCP servers the agent connects to. |
+| `SKILLS_PATH` | no | `./skills` | Directory of skill folders (domain knowledge injected into the agent's context). |
 | `MAX_TOOL_TURNS` | no | `20` | Safety cap on tool-call round trips per conversation turn before the agent gives up with an error. |
 | `LOG_LEVEL` | no | `INFO` | Standard Python logging level. |
 
@@ -102,6 +103,25 @@ Starts as `[]`. Supports local stdio subprocesses and remote HTTP servers:
 ```
 
 Discovered tools are namespaced as `mcp_<server_name>_<tool_name>` to avoid collisions. `transport` is `stdio`, `streamable_http`, or `sse` (legacy fallback). `env`/`headers` values support the same `${ENV_VAR}` interpolation as the REST allowlist. If a server fails to connect at startup, it's logged and skipped — it never blocks the app or other servers from starting. Changes require a restart.
+
+### Skills (`skills/`)
+
+Each subdirectory of `skills/` is one skill: a `SKILL.md` with YAML frontmatter (`name`, `description`, `always_on`) and a Markdown body, plus an optional `reference/` directory of additional files.
+
+```markdown
+---
+name: purestorage
+description: PureStorage FlashArray/FlashBlade provisioning, naming conventions, and REST API usage.
+always_on: false
+---
+
+Full instructions here...
+```
+
+- `always_on: true` skills are appended to the system prompt on every request — keep these short (safety rules, universal conventions).
+- `always_on: false` skills appear only as a name + description in the system prompt; the agent calls `load_skill(name)` to pull in the full instructions when relevant, and `read_skill_file(skill, path)` to read a specific file under that skill's `reference/` directory. This keeps large reference material (API cheat-sheets, CLI references) out of every prompt by default.
+
+Changes require a restart.
 
 ## Running locally
 
