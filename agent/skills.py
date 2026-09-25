@@ -23,6 +23,11 @@ class Skill:
 
 
 def load_skills(skills_dir: Path) -> list["Skill"]:
+    # Resolve to absolute up front: a relative skills_dir (e.g. the SKILLS_PATH
+    # default "./skills") would otherwise leak into Skill.reference_dir as a
+    # relative path, and resolve_in_sandbox() always rejects an absolute resolved
+    # candidate against a relative root, breaking read_skill_file entirely.
+    skills_dir = Path(skills_dir).resolve()
     skills: dict[str, Skill] = {}
 
     if not skills_dir.is_dir():
@@ -33,7 +38,14 @@ def load_skills(skills_dir: Path) -> list["Skill"]:
         if not skill_file.is_file():
             continue
 
-        skill = _parse_skill_file(skill_file, skill_dir)
+        try:
+            skill = _parse_skill_file(skill_file, skill_dir)
+        except Exception:
+            # a single unreadable/unparseable SKILL.md must never take down the
+            # whole app at startup -- same resilience convention as a misconfigured
+            # MCP server in agent/tools/mcp.py
+            logger.warning("skipping skill %r: failed to parse", skill_dir.name, exc_info=True)
+            continue
         if skill is None:
             continue
 

@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -111,3 +112,29 @@ def test_load_skills_warns_on_large_always_on_instructions(tmp_path, caplog):
 
     assert len(skills) == 1
     assert "big" in caplog.text
+
+
+def test_load_skills_returns_absolute_reference_dir_even_with_relative_input(tmp_path, monkeypatch):
+    # Regression test: a relative skills_dir (e.g. the SKILLS_PATH default "./skills")
+    # must not leak into Skill.reference_dir as a relative path, since
+    # resolve_in_sandbox() compares an absolute resolved candidate against it --
+    # a relative root there always fails containment, breaking read_skill_file entirely.
+    write_skill(tmp_path, "purestorage", reference_files={"cheatsheet.md": "content"})
+    monkeypatch.chdir(tmp_path)
+
+    skills = load_skills(Path("."))
+
+    assert skills[0].reference_dir.is_absolute()
+
+
+def test_load_skills_skips_non_dict_frontmatter(tmp_path, caplog):
+    skill_dir = tmp_path / "broken"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\njust a scalar string, not a mapping\n---\nbody")
+    write_skill(tmp_path, "purestorage")
+
+    with caplog.at_level(logging.WARNING):
+        skills = load_skills(tmp_path)
+
+    assert [s.name for s in skills] == ["purestorage"]
+    assert "broken" in caplog.text

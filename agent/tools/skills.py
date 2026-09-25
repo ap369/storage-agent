@@ -76,7 +76,12 @@ def build_skill_tools(
                     "skill": {"type": "string"},
                     "path": {
                         "type": "string",
-                        "description": "Path relative to the skill's reference/ directory.",
+                        "description": (
+                            "Path relative to the skill's reference/ directory -- do NOT "
+                            "include a leading 'reference/'. Example: 'cheatsheet.md', "
+                            "not 'reference/cheatsheet.md'. Use the exact filename from "
+                            "load_skill's 'Reference files available' list."
+                        ),
                     },
                 },
                 "required": ["skill", "path"],

@@ -6,4 +6,4 @@ always_on: false
 
 Volume names follow the pattern `<env>-<app>-<purpose>-<size>` (e.g. `prod-erp-data-500g`).
 
-For FlashArray REST API calls, use the `purestorage_*` tools if configured in the REST allowlist. See reference/rest-api-cheatsheet.md for endpoint details.
+For FlashArray REST API calls, use the `purestorage_*` tools if configured in the REST allowlist. See `rest-api-cheatsheet.md` (via `read_skill_file`) for endpoint details.

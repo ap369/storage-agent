@@ -1,4 +1,6 @@
-from agent.skills import Skill
+from pathlib import Path
+
+from agent.skills import Skill, load_skills
 from agent.tools.skills import build_skill_tools
 
 
@@ -117,3 +119,26 @@ async def test_read_skill_file_unknown_path_returns_error(tmp_path):
     result = await tools["read_skill_file"].execute({"skill": "purestorage", "path": "missing.md"})
 
     assert result.startswith("Error:")
+
+
+async def test_read_skill_file_works_end_to_end_with_relative_skills_path(tmp_path, monkeypatch):
+    # Regression test: main.py's default SKILLS_PATH ("./skills") is relative. This
+    # goes through the real load_skills() -> build_skill_tools() seam (not a hand-built
+    # Skill like the tests above) to prove read_skill_file actually works when skills
+    # were loaded from a relative directory, matching how the app really starts up.
+    skill_dir = tmp_path / "purestorage"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: purestorage\ndescription: d\nalways_on: false\n---\nbody"
+    )
+    ref_dir = skill_dir / "reference"
+    ref_dir.mkdir()
+    (ref_dir / "cheatsheet.md").write_text("the content")
+
+    monkeypatch.chdir(tmp_path)
+    skills = load_skills(Path("."))
+    tools = {t.name: t for t in build_skill_tools(skills)}
+
+    result = await tools["read_skill_file"].execute({"skill": "purestorage", "path": "cheatsheet.md"})
+
+    assert result == "the content"

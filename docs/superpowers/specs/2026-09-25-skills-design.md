@@ -60,8 +60,8 @@ Two triggering modes, chosen per skill via frontmatter:
 
 1. A user asks the agent to provision a PureStorage volume.
 2. The LLM sees `purestorage — PureStorage FlashArray/FlashBlade provisioning...` in the system prompt's on-demand catalog and calls `load_skill({"name": "purestorage"})`.
-3. The tool result gives it the skill's conventions/procedures, plus: `Reference files available (use read_skill_file to view): reference/rest-api-cheatsheet.md, reference/naming-conventions.md`.
-4. If the task needs exact REST syntax, the LLM calls `read_skill_file({"skill": "purestorage", "path": "reference/rest-api-cheatsheet.md"})` to pull that specific file rather than having it in context by default.
+3. The tool result gives it the skill's conventions/procedures, plus: `Reference files available (use read_skill_file to view): rest-api-cheatsheet.md, naming-conventions.md` — paths relative to the skill's own `reference/` directory, not including the `reference/` prefix.
+4. If the task needs exact REST syntax, the LLM calls `read_skill_file({"skill": "purestorage", "path": "rest-api-cheatsheet.md"})` to pull that specific file rather than having it in context by default.
 5. The LLM proceeds using the (already-existing) REST-allowlist tools, now informed by the loaded skill's conventions.
 
 ## Error handling summary
