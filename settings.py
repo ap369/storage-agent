@@ -14,5 +14,6 @@ class Settings(BaseSettings):
     SYSTEM_PROMPT_PATH: str = "./config/system_prompt.md"
     API_ALLOWLIST_PATH: str = "./config/api_allowlist.json"
     MCP_SERVERS_PATH: str = "./config/mcp_servers.json"
+    SKILLS_PATH: str = "./skills"
     MAX_TOOL_TURNS: int = 20
     LOG_LEVEL: str = "INFO"
